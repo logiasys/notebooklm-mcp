@@ -14,8 +14,8 @@ __description__ = (
 )
 
 from .client import NotebookLMClient
-from .config import AuthConfig, ServerConfig
-from .exceptions import AuthenticationError, NotebookLMError, StreamingError
+from .config import AuthConfig, OpalConfig, ServerConfig
+from .exceptions import AuthenticationError, NotebookLMError, OpalError, StreamingError
 from .server import NotebookLMFastMCP
 
 __all__ = [
@@ -23,7 +23,9 @@ __all__ = [
     "NotebookLMClient",
     "ServerConfig",
     "AuthConfig",
+    "OpalConfig",
     "NotebookLMError",
     "AuthenticationError",
+    "OpalError",
     "StreamingError",
 ]

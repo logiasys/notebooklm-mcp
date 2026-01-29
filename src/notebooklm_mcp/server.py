@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from .client import NotebookLMClient
 from .config import ServerConfig
-from .exceptions import NotebookLMError
+from .exceptions import NotebookLMError, OpalError
+from .opal_client import OpalClient
 
 
 # Pydantic models for type-safe tool parameters
@@ -53,12 +54,31 @@ class SetNotebookRequest(BaseModel):
     notebook_id: str = Field(..., description="The notebook ID to set as default")
 
 
+class OpalProcessRequest(BaseModel):
+    """Request model for processing an opal"""
+
+    opal_id: str = Field(..., description="The opal ID or URL to process")
+
+
+class OpalResultRequest(BaseModel):
+    """Request model for fetching opal results"""
+
+    opal_id: str = Field(..., description="The opal ID or URL to fetch result for")
+
+
+class OpalActionsRequest(BaseModel):
+    """Request model for listing opal actions"""
+
+    opal_id: str = Field(..., description="The opal ID or URL to list actions for")
+
+
 class NotebookLMFastMCP:
     """FastMCP v2 server for NotebookLM automation with enhanced error handling"""
 
     def __init__(self, config: ServerConfig):
         self.config = config
         self.client: Optional[NotebookLMClient] = None
+        self.opal_client: Optional[OpalClient] = None
 
         # Initialize FastMCP application
         self.app = FastMCP(name="NotebookLM MCP Server v2")
@@ -81,6 +101,20 @@ class NotebookLMFastMCP:
             logger.error(f"Failed to initialize client: {e}")
             raise NotebookLMError(f"Client initialization failed: {e}")
 
+    async def _ensure_opal_client(self) -> None:
+        """Ensure Opal client is initialized"""
+        if not self.config.opal.enabled:
+            raise OpalError("Opal integration is disabled in configuration")
+
+        try:
+            if self.opal_client is None:
+                self.opal_client = OpalClient(self.config)
+                await self.opal_client.start()
+                logger.info("✅ Opal client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Opal client: {e}")
+            raise OpalError(f"Opal client initialization failed: {e}")
+
     def _setup_tools(self) -> None:
         """Setup FastMCP v2 tools with enhanced error handling and performance"""
 
@@ -97,13 +131,27 @@ class NotebookLMFastMCP:
 
                 auth_status = getattr(self.client, "_is_authenticated", False)
 
-                return {
+                response = {
                     "status": "healthy" if auth_status else "needs_auth",
                     "message": "Server is running",
                     "authenticated": auth_status,
                     "notebook_id": self.config.default_notebook_id,
                     "mode": "headless" if self.config.headless else "gui",
                 }
+
+                if self.config.opal.enabled:
+                    opal_auth_status = getattr(
+                        self.opal_client, "_is_authenticated", False
+                    )
+                    response["opal"] = {
+                        "enabled": True,
+                        "authenticated": opal_auth_status,
+                        "base_url": self.config.opal.base_url,
+                    }
+                else:
+                    response["opal"] = {"enabled": False}
+
+                return response
 
             except Exception as e:
                 logger.error(f"Health check failed: {e}")
@@ -133,6 +181,83 @@ class NotebookLMFastMCP:
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
                 raise NotebookLMError(f"Failed to send message: {e}")
+
+        @self.app.tool()
+        async def opal_authenticate() -> Dict[str, Any]:
+            """Authenticate Opal session."""
+            try:
+                await self._ensure_opal_client()
+                auth_success = await self.opal_client.authenticate()
+
+                return {
+                    "status": "authenticated" if auth_success else "needs_auth",
+                    "authenticated": auth_success,
+                    "base_url": self.config.opal.base_url,
+                }
+            except Exception as e:
+                logger.error(f"Failed to authenticate Opal: {e}")
+                raise OpalError(f"Failed to authenticate Opal: {e}")
+
+        @self.app.tool()
+        async def opal_list() -> Dict[str, Any]:
+            """List available opals."""
+            try:
+                await self._ensure_opal_client()
+                if not getattr(self.opal_client, "_is_authenticated", False):
+                    await self.opal_client.authenticate()
+
+                opals = await self.opal_client.list_opals()
+
+                return {"status": "success", "count": len(opals), "opals": opals}
+            except Exception as e:
+                logger.error(f"Failed to list opals: {e}")
+                raise OpalError(f"Failed to list opals: {e}")
+
+        @self.app.tool()
+        async def opal_process(request: OpalProcessRequest) -> Dict[str, Any]:
+            """Process an opal by ID or URL."""
+            try:
+                await self._ensure_opal_client()
+                if not getattr(self.opal_client, "_is_authenticated", False):
+                    await self.opal_client.authenticate()
+
+                result = await self.opal_client.process_opal(request.opal_id)
+                return {"status": "started", **result}
+            except Exception as e:
+                logger.error(f"Failed to process opal: {e}")
+                raise OpalError(f"Failed to process opal: {e}")
+
+        @self.app.tool()
+        async def opal_result(request: OpalResultRequest) -> Dict[str, Any]:
+            """Fetch the result for an opal."""
+            try:
+                await self._ensure_opal_client()
+                if not getattr(self.opal_client, "_is_authenticated", False):
+                    await self.opal_client.authenticate()
+
+                result_text = await self.opal_client.get_opal_result(request.opal_id)
+                return {"status": "success", "opal_id": request.opal_id, "result": result_text}
+            except Exception as e:
+                logger.error(f"Failed to get opal result: {e}")
+                raise OpalError(f"Failed to get opal result: {e}")
+
+        @self.app.tool()
+        async def opal_actions(request: OpalActionsRequest) -> Dict[str, Any]:
+            """List available actions for an opal."""
+            try:
+                await self._ensure_opal_client()
+                if not getattr(self.opal_client, "_is_authenticated", False):
+                    await self.opal_client.authenticate()
+
+                actions = await self.opal_client.list_opal_actions(request.opal_id)
+                return {
+                    "status": "success",
+                    "opal_id": request.opal_id,
+                    "actions": actions,
+                }
+            except Exception as e:
+                logger.error(f"Failed to list opal actions: {e}")
+                raise OpalError(f"Failed to list opal actions: {e}")
 
         @self.app.tool()
         async def get_chat_response(request: GetResponseRequest) -> Dict[str, Any]:

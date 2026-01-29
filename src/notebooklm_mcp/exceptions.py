@@ -37,3 +37,9 @@ class ConfigurationError(NotebookLMError):
     """Raised when configuration is invalid"""
 
     pass
+
+
+class OpalError(NotebookLMError):
+    """Raised when Opal operations fail"""
+
+    pass

@@ -17,6 +17,7 @@ from rich.table import Table
 from .client import NotebookLMClient
 from .config import AuthConfig, ServerConfig, load_config
 from .exceptions import ConfigurationError
+from .opal_client import OpalClient
 from .server import NotebookLMFastMCP
 
 console = Console()
@@ -59,6 +60,18 @@ def create_default_config(
             "profile_dir": "./chrome_profile_notebooklm",
             "use_persistent_session": True,
             "auto_login": True,
+        },
+        "opal": {
+            "enabled": False,
+            "base_url": "https://opal.google.com",
+            "list_url": None,
+            "detail_url_template": None,
+            "list_selector": "div[role='listitem']",
+            "title_selector": "[data-testid='opal-title'], h2, h3",
+            "status_selector": "[data-testid='opal-status']",
+            "process_button_selector": "button[data-action='process']",
+            "result_selector": "[data-testid='opal-result']",
+            "action_selector": "button[data-action]",
         },
     }
 
@@ -710,6 +723,7 @@ async def guided_setup(config: ServerConfig) -> bool:
     console.print("[bold blue]🔧 Setting up browser and profile...[/bold blue]")
 
     client = NotebookLMClient(config)
+    opal_client: Optional[OpalClient] = None
     setup_success = False
 
     try:
@@ -758,6 +772,37 @@ async def guided_setup(config: ServerConfig) -> bool:
         else:
             console.print("✅ Already authenticated!")
 
+        if config.opal.enabled:
+            console.print("[yellow]Validating Opal authentication...[/yellow]")
+            opal_client = OpalClient(config)
+            await opal_client.start()
+            opal_auth_success = await opal_client.authenticate()
+
+            if not opal_auth_success:
+                console.print(
+                    Panel.fit(
+                        "[bold yellow]🔐 Opal Login Required[/bold yellow]\n\n"
+                        "Please complete the following steps:\n"
+                        "1. 🔐 Login with your Google account in the Opal browser\n"
+                        "2. ✅ Ensure you can access the Opal workspace\n"
+                        "3. ⏱️  Wait for the page to fully load\n"
+                        "4. ⌨️  Press Enter when ready...",
+                        title="🟣 Opal Authentication Setup",
+                    )
+                )
+
+                if not config.headless:
+                    input("\nPress Enter when Opal login is complete...")
+
+                opal_auth_success = await opal_client.authenticate()
+
+            if opal_auth_success:
+                console.print("✅ Opal authentication successful!")
+            else:
+                console.print(
+                    "⚠️  Opal authentication verification failed, but profile was saved"
+                )
+
         # Test basic functionality
         console.print("[yellow]Testing basic functionality...[/yellow]")
         try:
@@ -777,6 +822,8 @@ async def guided_setup(config: ServerConfig) -> bool:
     finally:
         if client:
             await client.close()
+        if opal_client:
+            await opal_client.close()
 
 
 def main() -> None:

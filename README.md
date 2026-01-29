@@ -225,6 +225,8 @@ class NotebookLMTool(BaseTool):
 
 ## 🔒 Authentication
 
+Para un análisis detallado del flujo de sesión, persistencia y la implementación inicial del login para “Opal de Google”, revisa `docs/opal-login-analysis.md`.
+
 ### Automatic Setup
 
 ```bash

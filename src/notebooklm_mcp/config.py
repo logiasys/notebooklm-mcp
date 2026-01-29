@@ -27,6 +27,22 @@ class AuthConfig:
 
 
 @dataclass
+class OpalConfig:
+    """Opal integration configuration"""
+
+    enabled: bool = False
+    base_url: str = "https://opal.google.com"
+    list_url: Optional[str] = None
+    detail_url_template: Optional[str] = None
+    list_selector: str = "div[role='listitem']"
+    title_selector: str = "[data-testid='opal-title'], h2, h3"
+    status_selector: str = "[data-testid='opal-status']"
+    process_button_selector: str = "button[data-action='process']"
+    result_selector: str = "[data-testid='opal-result']"
+    action_selector: str = "button[data-action]"
+
+
+@dataclass
 class ServerConfig:
     """Server configuration"""
 
@@ -45,6 +61,9 @@ class ServerConfig:
 
     # Authentication
     auth: AuthConfig = field(default_factory=AuthConfig)
+
+    # Opal integration
+    opal: OpalConfig = field(default_factory=OpalConfig)
 
     # Advanced settings
     streaming_timeout: int = 60
@@ -67,8 +86,10 @@ class ServerConfig:
     def from_dict(cls, data: Dict[str, Any]) -> "ServerConfig":
         """Create configuration from dictionary"""
         auth_data = data.pop("auth", {})
+        opal_data = data.pop("opal", {})
         auth_config = AuthConfig(**auth_data)
-        return cls(auth=auth_config, **data)
+        opal_config = OpalConfig(**opal_data)
+        return cls(auth=auth_config, opal=opal_config, **data)
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -88,6 +109,26 @@ class ServerConfig:
                 ).lower()
                 == "true",
             ),
+            opal=OpalConfig(
+                enabled=os.getenv("OPAL_ENABLED", "false").lower() == "true",
+                base_url=os.getenv("OPAL_BASE_URL", "https://opal.google.com"),
+                list_url=os.getenv("OPAL_LIST_URL"),
+                detail_url_template=os.getenv("OPAL_DETAIL_URL_TEMPLATE"),
+                list_selector=os.getenv("OPAL_LIST_SELECTOR", "div[role='listitem']"),
+                title_selector=os.getenv(
+                    "OPAL_TITLE_SELECTOR", "[data-testid='opal-title'], h2, h3"
+                ),
+                status_selector=os.getenv(
+                    "OPAL_STATUS_SELECTOR", "[data-testid='opal-status']"
+                ),
+                process_button_selector=os.getenv(
+                    "OPAL_PROCESS_BUTTON_SELECTOR", "button[data-action='process']"
+                ),
+                result_selector=os.getenv(
+                    "OPAL_RESULT_SELECTOR", "[data-testid='opal-result']"
+                ),
+                action_selector=os.getenv("OPAL_ACTION_SELECTOR", "button[data-action]"),
+            ),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -95,6 +136,8 @@ class ServerConfig:
         result = {}
         for key, value in self.__dict__.items():
             if isinstance(value, AuthConfig):
+                result[key] = value.__dict__
+            elif isinstance(value, OpalConfig):
                 result[key] = value.__dict__
             else:
                 result[key] = value
